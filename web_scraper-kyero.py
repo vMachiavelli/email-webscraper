@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from typing import Optional
+from urllib.parse import urljoin, urlparse, parse_qsl, urlencode, urlunparse
 
 # ─── CONFIG ─────────────────────────────────────────────────────────────────────
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -128,79 +129,47 @@ def find_website_url(pro_url: str) -> Optional[str]:
     return None
 
 # ─── PAGINATION VIA /pagina-N LINKS ─────────────────────────────────────────────
-def get_agent_pro_pages(location_slug: str) -> list[tuple[str,str]]:
-    """
-    Scrape Idealista listing pages, extract agencies from the expert section
-    and any stray /pro/... links, then follow /pagina-N or /pagina-N.htm links
-    in ascending order until all pages are visited.
-    """
-    base_url      = f"https://www.idealista.com/agencias-inmobiliarias/{location_slug}/inmobiliarias"
-    next_url      = base_url
-    agencies      = []
-    visited_pages = {1}
+from selenium import webdriver
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.firefox.service import Service
+import time
 
-    while next_url:
-        print(f"[DEBUG] Fetching: {next_url}")
-        try:
-            resp = session.get(next_url, timeout=(5,30))
-            resp.raise_for_status()
-        except Exception as e:
-            print(f"[DEBUG]    fetch failed: {e}")
-            break
+def get_agent_pro_pages_selenium_firefox(location_slug: str):
+    url = f"https://www.idealista.com/agencias-inmobiliarias/{location_slug}/inmobiliarias"
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+    opts = FirefoxOptions()
+    opts.add_argument("--headless")
+    # auto-download & launch geckodriver
+    driver = webdriver.Firefox(service=Service, options=opts)
 
-        # 1) expert section
-        section = soup.select_one("section.agency-list.zone-experts-list")
-        if section:
-            cards = section.select("article.zone-experts-agency-card")
-            print(f"[DEBUG]    found {len(cards)} agency cards in expert section")
-            for card in cards:
-                pro_url = card.get("data-microsite-url")
-                link    = card.select_one("span.agency-name a[role=heading]")
-                if not pro_url or not link:
-                    continue
-                name = link.get_text(strip=True)
-                if name and pro_url not in [u for _,u in agencies]:
-                    agencies.append((name, pro_url))
-                    print(f"[DEBUG]    ➕ {name}: {pro_url}")
+    try:
+        driver.get(url)
 
-        # 2) stray /pro/... links
-        print("[DEBUG]    scanning for extra Pro links on page")
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if re.match(r"^https?://www\.idealista\.com/pro/[^/]+/?$", href):
-                name = a.get_text(strip=True)
-                if name and href not in [u for _,u in agencies]:
-                    agencies.append((name, href))
-                    print(f"[DEBUG]    (extra) ➕ {name}: {href}")
-
-        # 3) collect all pagina-N or pagina-N.htm links
-        page_links = []
-        for a in soup.find_all("a", href=True):
-            m = re.search(r'pagina-(\d+)(?:\.htm)?', a["href"])
-            if m:
-                num = int(m.group(1))
-                page_links.append((num, a["href"]))
-        print(f"[DEBUG]    pagination links found: {[n for n,_ in page_links]}")
-
-        # 4) follow the smallest unvisited page
-        next_url = None
-        for num, href in sorted(page_links):
-            if num not in visited_pages:
-                visited_pages.add(num)
-                next_url = urljoin(base_url, href)
-                print(f"[DEBUG]    following page {num} → {next_url}")
-                time.sleep(1)
+        last_count = -1
+        while True:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
+            cards = driver.find_elements(By.CSS_SELECTOR, "article.zone-experts-agency-card")
+            if len(cards) == last_count:
                 break
+            last_count = len(cards)
 
-        if not next_url:
-            print("[DEBUG]    no more pagina-N links; stopping pagination")
-            break
+        agencies = []
+        for card in cards:
+            pro_url = card.get_attribute("data-microsite-url")
+            try:
+                name = card.find_element(By.CSS_SELECTOR, "span.agency-name a[role=heading]").text.strip()
+            except:
+                continue
+            if name and pro_url:
+                agencies.append((name, pro_url))
 
-    print(f"[DEBUG] Completed scraping Pro pages: {len(agencies)} total")
+    finally:
+        driver.quit()
+
+    print(f"[DEBUG] Selenium (Firefox) scraped {len(agencies)} agencies")
     return agencies
-
+    
 # ─── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
     target_url = "https://www.idealista.com/agencias-inmobiliarias/orihuela-alicante/inmobiliarias"
@@ -209,7 +178,7 @@ def main():
         raise RuntimeError(f"Cannot parse slug from URL: {target_url}")
     slug = m.group(1)
 
-    agencies = get_agent_pro_pages(slug)
+    agencies = get_agent_pro_pages_selenium_firefox(slug)
     rows = []
 
     for name, pro_url in agencies:
