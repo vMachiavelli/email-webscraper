@@ -100,7 +100,6 @@ def fetch_rendered_html(url):
         print(f"    [DEBUG] → Render failed for {url}: {e}")
         return ""
 
-
 def extract_emails(html):
     """
     Return a sorted list of unique emails found in `html`.
@@ -111,7 +110,6 @@ def extract_emails(html):
     print(f"        [DEBUG] extract_emails: found {len(emails)} => {emails}")
     return emails
 
-
 def find_contact_links(html):
     """
     Return list of all hrefs matching the “contac…” regex in raw HTML.
@@ -119,7 +117,6 @@ def find_contact_links(html):
     links = HREF_CONTA_RX.findall(html)
     print(f"        [DEBUG] find_contact_links: found {len(links)} raw hrefs")
     return links
-
 
 def get_internal_links(html, base_url):
     """
@@ -146,7 +143,6 @@ def get_internal_links(html, base_url):
         links.add(normalized)
     print(f"        [DEBUG] get_internal_links: found {len(links)} valid links on {base_url}")
     return links
-
 
 def deep_search_agency(agency_name, homepage_html=None, homepage_url=None):
     """
@@ -208,7 +204,6 @@ def deep_search_agency(agency_name, homepage_html=None, homepage_url=None):
 
     print("    [DEBUG] Deep‐search completed, no emails found")
     return []
-
 
 def main():
     # 1) Load the Idealista CSV and grab the "names" column

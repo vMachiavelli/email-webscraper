@@ -1,61 +1,100 @@
 import re
 import pandas as pd
+import dns.resolver
+import tldextract
 
 # --- CONFIGURATION ---
-INPUT_CSV   = "out_combined.csv"
-OUTPUT_CSV  = "out_combined_cleaned.csv"
+INPUT_FILES = [
+    "out_combined.csv",
+    "Marbella emails 1 (205).csv",
+    "Marbella Emails 2 (194).csv",
+    "Marbella emails 3 (180).csv",
+    "Marbella emails 4 (193).csv",
+    "Marbella emails 5 (191).csv",
+]
+OUTPUT_FILE = "all_unique_emails.csv"
 # ------------------------
 
-# Strict regex for valid email addresses
-EMAIL_REGEX = re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+# 1) Strict regex for valid email addresses
+EMAIL_RX = re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 
-# Regex to detect media files (case-insensitive)
-MEDIA_EXT_REGEX = re.compile(
+# 2) Regex to detect media URLs (case-insensitive)
+MEDIA_EXT_RX = re.compile(
     r'.*\.(?:png|jpg|jpeg|gif|svg|mp4|mp3|webp)$',
     re.IGNORECASE
 )
 
+# 3) Regex to detect any “wixpress” emails
+WIXPRESS_RX = re.compile(r'wixpress', re.IGNORECASE)
+
+def has_valid_tld(email: str) -> bool:
+    ext = tldextract.extract(email)
+    return bool(ext.suffix)
+
+def has_mx_record(domain: str) -> bool:
+    try:
+        dns.resolver.resolve(domain, 'MX')
+        return True
+    except Exception:
+        return False
+
+def is_valid(email: str) -> bool:
+    """Return True if email passes all checks: format, non-media, non-wixpress, valid TLD, MX record."""
+    if not EMAIL_RX.match(email):
+        return False
+    if MEDIA_EXT_RX.match(email):
+        return False
+    if WIXPRESS_RX.search(email):
+        return False
+
+    # TLD check
+    if not has_valid_tld(email):
+        return False
+
+    # MX record check
+    domain = email.split('@', 1)[1]
+    if not has_mx_record(domain):
+        return False
+
+    return True
+
+def extract_emails_from_df(df: pd.DataFrame) -> list:
+    """Extract all values from columns containing 'email' (or second column fallback)."""
+    cols = [c for c in df.columns if 'email' in c.lower()]
+    if not cols and df.shape[1] >= 2:
+        cols = [df.columns[1]]
+    emails = []
+    for col in cols:
+        s = df[col].dropna().astype(str).str.strip().str.lower()
+        emails.extend(s.tolist())
+    return emails
+
 def main():
-    # 1) Load the CSV into a DataFrame
-    try:
-        df = pd.read_csv(INPUT_CSV, encoding="utf-8")
-    except FileNotFoundError:
-        print(f"[ERROR] '{INPUT_CSV}' not found. Please ensure it’s in the same folder.")
-        return
-    except Exception as e:
-        print(f"[ERROR] Failed to read '{INPUT_CSV}': {e}")
-        return
+    all_emails = []
 
-    if "email" not in df.columns:
-        print(f"[ERROR] '{INPUT_CSV}' has no 'email' column. Columns found: {list(df.columns)}")
-        return
+    for path in INPUT_FILES:
+        try:
+            df = pd.read_csv(path, encoding="utf-8", dtype=str)
+        except Exception as e:
+            print(f"[WARN] Could not read '{path}': {e}")
+            continue
 
-    total_rows = len(df)
+        extracted = extract_emails_from_df(df)
+        filtered = [e for e in extracted if is_valid(e)]
+        print(f"{path}: {len(extracted)} extracted, {len(filtered)} valid")
+        all_emails.extend(filtered)
 
-    # 2) Build masks for valid email and non-media
-    is_valid_email = df["email"].astype(str).str.match(EMAIL_REGEX)
-    is_not_media  = ~df["email"].astype(str).str.match(MEDIA_EXT_REGEX)
+    unique_emails = sorted(set(all_emails))
+    print(f"\nTotal collected: {len(all_emails)}")
+    print(f"Unique after dedupe: {len(unique_emails)}")
 
-    # 3) Combine masks: only keep rows where both are True
-    mask = is_valid_email & is_not_media
-    df_cleaned = df[mask].reset_index(drop=True)
-
-    kept_rows    = len(df_cleaned)
-    removed_rows = total_rows - kept_rows
-
-    # 4) Save the cleaned DataFrame
-    try:
-        df_cleaned.to_csv(OUTPUT_CSV, index=False, encoding="utf-8")
-    except Exception as e:
-        print(f"[ERROR] Failed to write '{OUTPUT_CSV}': {e}")
-        return
-
-    # 5) Print summary
-    print("Email‐cleaning summary:")
-    print(f"  Total rows in '{INPUT_CSV}':       {total_rows}")
-    print(f"  Rows with valid emails kept:      {kept_rows}")
-    print(f"  Rows removed (invalid/media):     {removed_rows}")
-    print(f"\nCleaned CSV written to: '{OUTPUT_CSV}'")
+    pd.DataFrame({'email': unique_emails}).to_csv(
+        OUTPUT_FILE, index=False, encoding="utf-8"
+    )
+    print(f"\nSaved {len(unique_emails)} emails to '{OUTPUT_FILE}'")
 
 if __name__ == "__main__":
     main()
+
+# Dependencies:
+# pip install pandas dnspython tldextract
