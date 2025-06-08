@@ -95,6 +95,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# Dependencies:
-# pip install pandas dnspython tldextract
