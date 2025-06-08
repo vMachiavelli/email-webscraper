@@ -27,71 +27,87 @@ MEDIA_EXT_RX = re.compile(
 # 3) Regex to detect any “wixpress” emails
 WIXPRESS_RX = re.compile(r'wixpress', re.IGNORECASE)
 
+# Helpers
+
 def has_valid_tld(email: str) -> bool:
     ext = tldextract.extract(email)
-    return bool(ext.suffix)
+    valid = bool(ext.suffix)
+    print(f"    [DEBUG] TLD check for '{email}', suffix='{ext.suffix}', valid={valid}")
+    return valid
+
 
 def has_mx_record(domain: str) -> bool:
     try:
         dns.resolver.resolve(domain, 'MX')
+        print(f"    [DEBUG] MX record found for domain '{domain}'")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"    [DEBUG] No MX record for domain '{domain}': {e}")
         return False
+
 
 def is_valid(email: str) -> bool:
-    """Return True if email passes all checks: format, non-media, non-wixpress, valid TLD, MX record."""
+    print(f"[DEBUG] Validating email '{email}'...")
     if not EMAIL_RX.match(email):
+        print("    [DEBUG] Failed EMAIL_RX")
         return False
     if MEDIA_EXT_RX.match(email):
+        print("    [DEBUG] Matches MEDIA_EXT_RX, skipping")
         return False
     if WIXPRESS_RX.search(email):
+        print("    [DEBUG] Contains 'wixpress', skipping")
         return False
-
-    # TLD check
     if not has_valid_tld(email):
         return False
-
-    # MX record check
     domain = email.split('@', 1)[1]
     if not has_mx_record(domain):
         return False
-
+    print(f"    [DEBUG] Email '{email}' passed all checks")
     return True
 
-def extract_emails_from_df(df: pd.DataFrame) -> list:
-    """Extract all values from columns containing 'email' (or second column fallback)."""
+
+def extract_emails_from_df(df: pd.DataFrame, path: str) -> list:
+    print(f"[DEBUG] Extracting emails from '{path}'")
     cols = [c for c in df.columns if 'email' in c.lower()]
     if not cols and df.shape[1] >= 2:
         cols = [df.columns[1]]
-    emails = []
+    all_emails = []
     for col in cols:
         s = df[col].dropna().astype(str).str.strip().str.lower()
-        emails.extend(s.tolist())
-    return emails
+        print(f"    [DEBUG] Column '{col}' has {len(s)} entries")
+        all_emails.extend(s.tolist())
+    print(f"    [DEBUG] Extracted total {len(all_emails)} raw emails from '{path}'")
+    return all_emails
+
 
 def main():
     all_emails = []
 
     for path in INPUT_FILES:
+        print(f"\n[INFO] Processing file: {path}")
         try:
             df = pd.read_csv(path, encoding="utf-8", dtype=str)
+            print(f"    [DEBUG] Read {len(df)} rows from '{path}'")
         except Exception as e:
-            print(f"[WARN] Could not read '{path}': {e}")
+            print(f"[WARN] Skipping '{path}' due to read error: {e}")
             continue
 
-        extracted = extract_emails_from_df(df)
-        filtered = [e for e in extracted if is_valid(e)]
-        print(f"{path}: {len(extracted)} extracted, {len(filtered)} valid")
+        extracted = extract_emails_from_df(df, path)
+        filtered = []
+        for e in extracted:
+            if is_valid(e):
+                filtered.append(e)
+        print(f"    [DEBUG] After validation: kept {len(filtered)} of {len(extracted)} emails")
         all_emails.extend(filtered)
 
     unique_emails = sorted(set(all_emails))
-    print(f"\nTotal collected: {len(all_emails)}")
-    print(f"Unique after dedupe: {len(unique_emails)}")
+    print(f"\n[INFO] Total collected emails: {len(all_emails)}")
+    print(f"[INFO] Unique emails after dedupe: {len(unique_emails)}")
 
     pd.DataFrame({'email': unique_emails}).to_csv(
         OUTPUT_FILE, index=False, encoding="utf-8"
     )
-    print(f"\nSaved {len(unique_emails)} emails to '{OUTPUT_FILE}'")
+    print(f"\n[INFO] Saved {len(unique_emails)} unique emails to '{OUTPUT_FILE}'")
 
 if __name__ == "__main__":
     main()
