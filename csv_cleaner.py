@@ -26,6 +26,7 @@ MEDIA_EXT_RX = re.compile(
 
 # 3) Regex to detect any “wixpress” emails
 WIXPRESS_RX = re.compile(r'wixpress', re.IGNORECASE)
+ABC_123_RX = re.compile(r'123@abc.com')
 
 # Helpers
 
